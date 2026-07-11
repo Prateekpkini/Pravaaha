@@ -132,6 +132,7 @@ async def get_route(
     start_lon: float = Query(..., description="Start longitude"),
     end_lat: float = Query(..., description="End latitude"),
     end_lon: float = Query(..., description="End longitude"),
+    weather_condition: str = Query("clear", description="Weather condition (clear or monsoon)"),
 ):
     """
     Find the fastest driveable route between two coordinates using A*.
@@ -153,14 +154,59 @@ async def get_route(
         raise HTTPException(status_code=400, detail="Start and end resolve to the same node")
 
     try:
-        # A* shortest path using 'travel_time' attribute
-        path_nodes = nx.astar_path(graph, orig_node, dest_node, heuristic=haversine_heuristic, weight="travel_time")
+        if weather_condition == "monsoon":
+            def monsoon_weight_fn(u, v, edge_dict):
+                min_w = float('inf')
+                for key, data in edge_dict.items():
+                    original_tt = data.get("travel_time", 10.0)
+                    
+                    # Snap node coordinates to compute elevation
+                    u_node = graph.nodes[u]
+                    v_node = graph.nodes[v]
+                    avg_lat = (u_node["y"] + v_node["y"]) / 2.0
+                    avg_lon = (u_node["x"] + v_node["x"]) / 2.0
+                    
+                    # Proximity to Netravati River (South)
+                    dist_netravati = abs(avg_lat - 12.835)
+                    # Proximity to Gurupura River (North/West)
+                    dist_gurupura_ns = abs(avg_lon - 74.825) if 12.85 <= avg_lat <= 12.92 else 999.0
+                    dist_gurupura_ew = abs(avg_lat - 12.925) if 74.82 <= avg_lon <= 74.88 else 999.0
+                    # Proximity to Arabian Sea (West)
+                    dist_sea = abs(avg_lon - 74.815)
+                    
+                    min_dist_to_water = min(dist_netravati, dist_gurupura_ns, dist_gurupura_ew, dist_sea)
+                    dist_meters = min_dist_to_water * 111000
+                    
+                    # Synthetic elevation (m)
+                    elevation = 2.0 + 48.0 * (1.0 - math.exp(-dist_meters / 1000.0))
+                    
+                    # Low-lying roads penalty: exponential penalty for low elevations
+                    low_lying_penalty = 1.0 + 15.0 * math.exp(-elevation / 8.0)
+                    
+                    # Dirt path penalty: identify unpaved/minor tracks
+                    highway = data.get("highway", "")
+                    if isinstance(highway, list):
+                        highway = highway[0]
+                    
+                    dirt_penalty = 1.0
+                    if highway in ["track", "path", "unclassified", "service"]:
+                        dirt_penalty = 8.0
+                        
+                    weight = original_tt * low_lying_penalty * dirt_penalty
+                    if weight < min_w:
+                        min_w = weight
+                return min_w
+                
+            path_nodes = nx.astar_path(graph, orig_node, dest_node, heuristic=haversine_heuristic, weight=monsoon_weight_fn)
+        else:
+            path_nodes = nx.astar_path(graph, orig_node, dest_node, heuristic=haversine_heuristic, weight="travel_time")
     except nx.NetworkXNoPath:
         raise HTTPException(status_code=404, detail="No route found between these points")
 
     # Convert node IDs to [lat, lon] coordinates
     coords = []
     total_length = 0.0
+    total_time = 0.0
     for i, node in enumerate(path_nodes):
         node_data = graph.nodes[node]
         coords.append([node_data["y"], node_data["x"]])  # [lat, lon]
@@ -170,14 +216,122 @@ async def get_route(
             if edge_data:
                 # MultiDiGraph: pick shortest edge between pair
                 min_len = min(d.get("length", 0) for d in edge_data.values())
+                min_time = min(d.get("travel_time", 10.0) for d in edge_data.values())
                 total_length += min_len
+                total_time += min_time
 
     return {
         "route": coords,
         "distance_m": round(total_length, 1),
         "distance_km": round(total_length / 1000, 2),
+        "estimated_time_s": round(total_time, 1),
         "node_count": len(path_nodes),
         "flood_active": len(flooded_edges) > 0,
+    }
+
+
+@app.get("/get-flood-route")
+async def get_flood_route(
+    start_lat: float = Query(..., description="Ambulance current latitude"),
+    start_lon: float = Query(..., description="Ambulance current longitude"),
+    end_lat: float = Query(..., description="Destination latitude"),
+    end_lon: float = Query(..., description="Destination longitude"),
+    flood_lat: float = Query(..., description="Flood zone center latitude"),
+    flood_lon: float = Query(..., description="Flood zone center longitude"),
+    flood_radius_m: float = Query(..., description="Flood zone radius in meters"),
+):
+    """
+    Compute a route that avoids an expanding circular flood zone.
+    Temporarily penalizes all edges touching nodes inside the flood radius,
+    then restores original weights after pathfinding.
+    """
+    if graph is None or kdtree is None:
+        raise HTTPException(status_code=503, detail="Graph not loaded")
+
+    try:
+        _, idx1 = kdtree.query([start_lon, start_lat])
+        orig_node = node_ids[idx1]
+        _, idx2 = kdtree.query([end_lon, end_lat])
+        dest_node = node_ids[idx2]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not snap coordinates to graph: {e}")
+
+    if orig_node == dest_node:
+        raise HTTPException(status_code=400, detail="Start and end resolve to the same node")
+
+    # Convert flood radius from meters to approximate degrees for KD-Tree query
+    # 1 degree latitude ~ 111,000m; 1 degree longitude ~ 111,000m * cos(lat)
+    radius_deg = flood_radius_m / 111000.0
+
+    # Find all node indices within the flood radius
+    flooded_indices = kdtree.query_ball_point([flood_lon, flood_lat], radius_deg)
+
+    # Collect the flooded node IDs
+    flooded_node_set = set()
+    for idx in flooded_indices:
+        flooded_node_set.add(node_ids[idx])
+
+    # Temporarily penalize all edges touching flooded nodes
+    modified_edges = []
+    PENALTY = 999999.0
+    for fnode in flooded_node_set:
+        # Outgoing edges
+        if graph.has_node(fnode):
+            for u, v, k, d in graph.edges(fnode, keys=True, data=True):
+                original_tt = d.get("travel_time", 10.0)
+                if original_tt < PENALTY:
+                    modified_edges.append((u, v, k, original_tt))
+                    d["travel_time"] = PENALTY
+            # Incoming edges (for DiGraph traversal)
+            for u, v, k, d in graph.in_edges(fnode, keys=True, data=True):
+                original_tt = d.get("travel_time", 10.0)
+                if original_tt < PENALTY:
+                    modified_edges.append((u, v, k, original_tt))
+                    d["travel_time"] = PENALTY
+
+    try:
+        path_nodes = nx.astar_path(
+            graph, orig_node, dest_node,
+            heuristic=haversine_heuristic, weight="travel_time"
+        )
+    except nx.NetworkXNoPath:
+        # Restore weights before raising
+        for u, v, k, orig_tt in modified_edges:
+            try:
+                graph[u][v][k]["travel_time"] = orig_tt
+            except KeyError:
+                pass
+        raise HTTPException(status_code=404, detail="No route found avoiding the flood zone")
+    finally:
+        # Always restore original weights
+        for u, v, k, orig_tt in modified_edges:
+            try:
+                graph[u][v][k]["travel_time"] = orig_tt
+            except KeyError:
+                pass
+
+    # Build response coordinates and distance
+    coords = []
+    total_length = 0.0
+    total_time = 0.0
+    for i, node in enumerate(path_nodes):
+        node_data = graph.nodes[node]
+        coords.append([node_data["y"], node_data["x"]])
+        if i > 0:
+            edge_data = graph.get_edge_data(path_nodes[i - 1], node)
+            if edge_data:
+                min_len = min(d.get("length", 0) for d in edge_data.values())
+                min_time = min(d.get("travel_time", 10.0) for d in edge_data.values())
+                total_length += min_len
+                total_time += min_time
+
+    return {
+        "route": coords,
+        "distance_m": round(total_length, 1),
+        "distance_km": round(total_length / 1000, 2),
+        "estimated_time_s": round(total_time, 1),
+        "node_count": len(path_nodes),
+        "flooded_nodes_avoided": len(flooded_node_set),
     }
 
 

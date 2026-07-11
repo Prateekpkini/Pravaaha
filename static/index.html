@@ -16,6 +16,9 @@
 
     <!-- App CSS -->
     <link rel="stylesheet" href="/static/style.css" />
+
+    <!-- Turf.js for spatial math -->
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 </head>
 <body>
 
@@ -36,39 +39,55 @@
 
         <div class="search-group">
             <div class="search-input-wrapper">
-                <input type="text" id="input-start" class="search-input" placeholder="Start Location..." autocomplete="off" />
-                <button id="btn-search-start" class="btn-search" title="Search">🔍</button>
-            </div>
-            <div class="search-input-wrapper">
-                <input type="text" id="input-end" class="search-input" placeholder="End Location..." autocomplete="off" />
+                <input type="text" id="input-end" class="search-input" placeholder="Search Destination..." autocomplete="off" />
                 <button id="btn-search-end" class="btn-search" title="Search">🔍</button>
             </div>
         </div>
 
+        <!-- Settings Section with custom toggles -->
+        <div class="settings-group">
+            <div class="setting-item">
+                <span class="setting-label">🌧️ Monsoon Simulation</span>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-monsoon" />
+                    <span class="slider round"></span>
+                </label>
+            </div>
+            <div class="setting-item">
+                <span class="setting-label">🌓 Light Theme</span>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-theme" />
+                    <span class="slider round"></span>
+                </label>
+            </div>
+        </div>
+
         <div class="button-group">
-            <button id="btn-route" class="btn btn-primary" disabled>
-                <span class="btn-icon">🧭</span>
-                <span class="btn-label">Find Safe Route</span>
+            <button id="btn-simulate" class="btn btn-primary" disabled>
+                <span class="btn-icon">🚑</span>
+                <span class="btn-label">Start Simulation</span>
                 <div class="btn-ripple"></div>
             </button>
 
-            <button id="btn-clear-route" class="btn btn-secondary">
-                <span class="btn-icon">🔄</span>
-                <span class="btn-label">Clear Selection</span>
-                <div class="btn-ripple"></div>
-            </button>
+            <div class="btn-row">
+                <button id="btn-clear-route" class="btn btn-secondary flex-1" title="Clear Markers & Route">
+                    <span class="btn-icon">🔄</span>
+                    <span class="btn-label">Clear</span>
+                    <div class="btn-ripple"></div>
+                </button>
 
-            <button id="btn-flood" class="btn btn-danger">
-                <span class="btn-icon">🌊</span>
-                <span class="btn-label">Trigger Monsoon Surge</span>
-                <div class="btn-ripple"></div>
-            </button>
+                <button id="btn-flood" class="btn btn-danger flex-1" title="Simulate Random Floods">
+                    <span class="btn-icon">🌊</span>
+                    <span class="btn-label">Flood</span>
+                    <div class="btn-ripple"></div>
+                </button>
 
-            <button id="btn-clear" class="btn btn-success">
-                <span class="btn-icon">☀️</span>
-                <span class="btn-label">Clear Weather</span>
-                <div class="btn-ripple"></div>
-            </button>
+                <button id="btn-clear" class="btn btn-success flex-1" title="Clear Weather & Floods">
+                    <span class="btn-icon">☀️</span>
+                    <span class="btn-label">Reset</span>
+                    <div class="btn-ripple"></div>
+                </button>
+            </div>
         </div>
 
         <div class="info-section" id="route-info" style="display: none;">
@@ -77,8 +96,8 @@
                 <span class="info-value" id="route-distance">—</span>
             </div>
             <div class="info-row">
-                <span class="info-label">Waypoints</span>
-                <span class="info-value" id="route-nodes">—</span>
+                <span class="info-label">ETA</span>
+                <span class="info-value" id="route-eta">—</span>
             </div>
             <div class="info-row">
                 <span class="info-label">Flood Status</span>
