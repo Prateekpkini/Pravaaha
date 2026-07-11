@@ -1,6 +1,6 @@
 # Pravaaha (AquaRoute)
 
-Pravaaha is a real-time, flood-aware routing engine that computes optimal paths and isochrones (reachable areas) by integrating OpenStreetMap (OSM) data with dynamic flood depth updates. It allows emergency response vehicles (like ambulances and rescue trucks) to safely navigate around flooded zones based on their specific clearance heights.
+Pravaaha is a real-time, flood-aware routing engine that computes optimal paths and isochrones by integrating OpenStreetMap (OSM) data with dynamic flood depth updates. It allows emergency response vehicles (like ambulances and rescue trucks) to safely navigate around flooded zones based on their specific clearance heights.
 
 The system is composed of:
 1. **A Rust Backend**: An [Axum](https://github.com/tokio-rs/axum)-based web server that parses OSM PBF road networks, builds a spatial R-tree index, updates road flood levels in real time, and executes a customized bidirectional A* algorithm.
