@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Pravaaha — AI-powered flood-aware evacuation routing for Mangalore. Find safe routes during monsoon flooding in real time." />
+    <title>Pravaaha — Flood-Aware Evacuation Routing</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet" />
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <!-- App CSS -->
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+    <!-- Map container -->
+    <div id="map"></div>
+
+    <!-- Floating control panel -->
+    <div id="control-panel" class="glass-panel">
+        <div class="panel-header">
+            <h1 id="app-title" class="gradient-text">प्रवाह</h1>
+            <p class="subtitle">Flood-Aware Evacuation Router</p>
+        </div>
+
+        <div class="status-bar" id="status-bar">
+            <div class="status-dot status-ok" id="status-dot"></div>
+            <span id="status-text">Initializing...</span>
+        </div>
+
+        <div class="button-group">
+            <button id="btn-route" class="btn btn-primary" disabled>
+                <span class="btn-icon">🧭</span>
+                <span class="btn-label">Find Safe Route</span>
+                <div class="btn-ripple"></div>
+            </button>
+
+            <button id="btn-flood" class="btn btn-danger">
+                <span class="btn-icon">🌊</span>
+                <span class="btn-label">Trigger Monsoon Surge</span>
+                <div class="btn-ripple"></div>
+            </button>
+
+            <button id="btn-clear" class="btn btn-success">
+                <span class="btn-icon">☀️</span>
+                <span class="btn-label">Clear Weather</span>
+                <div class="btn-ripple"></div>
+            </button>
+        </div>
+
+        <div class="info-section" id="route-info" style="display: none;">
+            <div class="info-row">
+                <span class="info-label">Distance</span>
+                <span class="info-value" id="route-distance">—</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Waypoints</span>
+                <span class="info-value" id="route-nodes">—</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Flood Status</span>
+                <span class="info-value" id="flood-status">Clear</span>
+            </div>
+        </div>
+
+        <div class="panel-footer">
+            <span class="hint">Click on the map to set destination</span>
+        </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loading-overlay" class="loading-overlay" style="display: none;">
+        <div class="spinner"></div>
+        <span id="loading-text">Computing route...</span>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- App JS -->
+    <script src="/static/app.js"></script>
+</body>
+</html>

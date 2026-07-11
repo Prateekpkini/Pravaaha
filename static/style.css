@@ -1,0 +1,501 @@
+/* ============================================================
+   Pravaaha — Style System
+   Premium dark-theme glassmorphism UI for flood-aware routing
+   ============================================================ */
+
+/* ---------- CSS Custom Properties ---------- */
+:root {
+    --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-display: 'Outfit', 'Inter', system-ui, sans-serif;
+
+    /* Core palette */
+    --bg-dark: #0a0e1a;
+    --bg-panel: rgba(15, 20, 40, 0.72);
+    --bg-panel-hover: rgba(20, 28, 55, 0.85);
+    --border-glass: rgba(100, 140, 255, 0.12);
+    --border-glass-hover: rgba(100, 180, 255, 0.25);
+
+    /* Accent colors */
+    --cyan-400: #22d3ee;
+    --cyan-500: #06b6d4;
+    --cyan-600: #0891b2;
+    --teal-400: #2dd4bf;
+    --teal-500: #14b8a6;
+
+    --amber-400: #fbbf24;
+    --amber-500: #f59e0b;
+    --red-400: #f87171;
+    --red-500: #ef4444;
+    --red-600: #dc2626;
+
+    --green-400: #4ade80;
+    --green-500: #22c55e;
+
+    /* Text */
+    --text-primary: #f0f4ff;
+    --text-secondary: rgba(200, 215, 255, 0.7);
+    --text-muted: rgba(160, 180, 220, 0.5);
+
+    /* Sizing */
+    --panel-width: 340px;
+    --panel-padding: 24px;
+    --radius-lg: 20px;
+    --radius-md: 14px;
+    --radius-sm: 10px;
+    --radius-xs: 6px;
+
+    /* Shadows */
+    --shadow-panel: 0 8px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--border-glass);
+    --shadow-btn: 0 4px 14px rgba(0, 0, 0, 0.35);
+    --shadow-btn-hover: 0 6px 24px rgba(0, 0, 0, 0.5);
+    --shadow-glow-cyan: 0 0 20px rgba(6, 182, 212, 0.4);
+    --shadow-glow-red: 0 0 20px rgba(239, 68, 68, 0.5);
+    --shadow-glow-green: 0 0 20px rgba(34, 197, 94, 0.4);
+
+    /* Transitions */
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+    --transition-fast: 0.2s var(--ease-out-expo);
+    --transition-med: 0.35s var(--ease-out-expo);
+    --transition-slow: 0.5s var(--ease-out-expo);
+}
+
+
+/* ---------- Reset & Base ---------- */
+*, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: var(--font-body);
+    background: var(--bg-dark);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+
+/* ---------- Map ---------- */
+#map {
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+}
+
+/* Override Leaflet attribution styling */
+.leaflet-control-attribution {
+    background: rgba(10, 14, 26, 0.7) !important;
+    color: var(--text-muted) !important;
+    font-size: 10px !important;
+    backdrop-filter: blur(8px);
+    border-radius: 6px 0 0 0 !important;
+}
+
+.leaflet-control-attribution a {
+    color: var(--cyan-500) !important;
+}
+
+.leaflet-control-zoom {
+    border: none !important;
+    box-shadow: var(--shadow-panel) !important;
+    border-radius: var(--radius-sm) !important;
+    overflow: hidden;
+}
+
+.leaflet-control-zoom a {
+    background: var(--bg-panel) !important;
+    color: var(--text-primary) !important;
+    border: none !important;
+    backdrop-filter: blur(16px);
+    width: 36px !important;
+    height: 36px !important;
+    line-height: 36px !important;
+    font-size: 16px !important;
+    transition: background var(--transition-fast);
+}
+
+.leaflet-control-zoom a:hover {
+    background: var(--bg-panel-hover) !important;
+    color: var(--cyan-400) !important;
+}
+
+
+/* ---------- Glassmorphism Panel ---------- */
+.glass-panel {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    z-index: 1000;
+    width: var(--panel-width);
+    padding: var(--panel-padding);
+    background: var(--bg-panel);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-glass);
+    box-shadow: var(--shadow-panel);
+    transition: border-color var(--transition-med), box-shadow var(--transition-med);
+    animation: panelSlideIn 0.6s var(--ease-out-expo) both;
+}
+
+.glass-panel:hover {
+    border-color: var(--border-glass-hover);
+}
+
+@keyframes panelSlideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-30px) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
+}
+
+
+/* ---------- Panel Header ---------- */
+.panel-header {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.gradient-text {
+    font-family: var(--font-display);
+    font-size: 2.4rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, var(--cyan-400), var(--teal-400), var(--cyan-500));
+    background-size: 200% 200%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: gradientShift 4s ease-in-out infinite;
+}
+
+@keyframes gradientShift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+}
+
+.subtitle {
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-top: 4px;
+}
+
+
+/* ---------- Status Bar ---------- */
+.status-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: var(--radius-sm);
+    margin-bottom: 18px;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    transition: all var(--transition-fast);
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    transition: background var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.status-ok {
+    background: var(--green-400);
+    box-shadow: 0 0 8px rgba(74, 222, 128, 0.6);
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.status-warning {
+    background: var(--amber-400);
+    box-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
+    animation: pulse 1.2s ease-in-out infinite;
+}
+
+.status-danger {
+    background: var(--red-400);
+    box-shadow: 0 0 8px rgba(248, 113, 113, 0.6);
+    animation: pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.85); }
+}
+
+
+/* ---------- Buttons ---------- */
+.button-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+.btn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 14px 18px;
+    border: none;
+    border-radius: var(--radius-md);
+    font-family: var(--font-body);
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    overflow: hidden;
+    transition: all var(--transition-fast);
+    outline: none;
+}
+
+.btn:active {
+    transform: scale(0.97);
+}
+
+.btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+.btn-icon {
+    font-size: 1.15rem;
+    flex-shrink: 0;
+}
+
+.btn-label {
+    flex: 1;
+    text-align: left;
+}
+
+/* Primary — Cyan */
+.btn-primary {
+    background: linear-gradient(135deg, var(--cyan-600), var(--cyan-500));
+    color: #fff;
+    box-shadow: var(--shadow-btn);
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--cyan-500), var(--teal-400));
+    box-shadow: var(--shadow-btn-hover), var(--shadow-glow-cyan);
+    transform: translateY(-2px);
+}
+
+/* Danger — Amber/Red */
+.btn-danger {
+    background: linear-gradient(135deg, #b91c1c, var(--red-500));
+    color: #fff;
+    box-shadow: var(--shadow-btn);
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--red-500), var(--amber-500));
+    box-shadow: var(--shadow-btn-hover), var(--shadow-glow-red);
+    transform: translateY(-2px);
+}
+
+/* Success — Green */
+.btn-success {
+    background: linear-gradient(135deg, #15803d, var(--green-500));
+    color: #fff;
+    box-shadow: var(--shadow-btn);
+}
+
+.btn-success:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--green-500), var(--teal-400));
+    box-shadow: var(--shadow-btn-hover), var(--shadow-glow-green);
+    transform: translateY(-2px);
+}
+
+/* Ripple effect */
+.btn-ripple {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at var(--x, 50%) var(--y, 50%), rgba(255,255,255,0.25) 0%, transparent 60%);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+}
+
+.btn:hover .btn-ripple {
+    opacity: 1;
+}
+
+
+/* ---------- Info Section ---------- */
+.info-section {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+    animation: fadeIn 0.3s var(--ease-out-expo) both;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+}
+
+.info-row + .info-row {
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.info-label {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+}
+
+.info-value {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.info-value.flood-active {
+    color: var(--red-400);
+    text-shadow: 0 0 8px rgba(248, 113, 113, 0.4);
+}
+
+
+/* ---------- Panel Footer ---------- */
+.panel-footer {
+    text-align: center;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+
+/* ---------- Loading Overlay ---------- */
+.loading-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background: rgba(10, 14, 26, 0.6);
+    backdrop-filter: blur(6px);
+    animation: fadeIn 0.2s ease both;
+}
+
+.spinner {
+    width: 42px;
+    height: 42px;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-top-color: var(--cyan-400);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading-overlay span {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+
+/* ---------- Custom Leaflet Markers ---------- */
+
+/* Pulsing user marker */
+.user-marker {
+    position: relative;
+}
+
+.user-marker-dot {
+    width: 16px;
+    height: 16px;
+    background: var(--cyan-400);
+    border-radius: 50%;
+    border: 3px solid #fff;
+    box-shadow: 0 0 12px rgba(34, 211, 238, 0.6);
+    position: relative;
+    z-index: 2;
+}
+
+.user-marker-pulse {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 40px;
+    height: 40px;
+    background: rgba(34, 211, 238, 0.25);
+    border-radius: 50%;
+    z-index: 1;
+    animation: markerPulse 2s ease-in-out infinite;
+}
+
+@keyframes markerPulse {
+    0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+    100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+}
+
+/* Destination marker */
+.dest-marker {
+    width: 14px;
+    height: 14px;
+    background: var(--red-500);
+    border-radius: 50%;
+    border: 3px solid #fff;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.6);
+}
+
+
+/* ---------- Responsive ---------- */
+@media (max-width: 640px) {
+    .glass-panel {
+        top: auto;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        max-height: 55vh;
+        overflow-y: auto;
+        padding: 18px;
+    }
+
+    .gradient-text {
+        font-size: 1.8rem;
+    }
+}
