@@ -69,6 +69,8 @@ let floodCircle = null;
 let floodCenter = null;
 let floodRadius = 0;
 let lastFrameTime = 0;
+let currentSegmentDistance = null;
+let lastCollisionCheckTime = 0;
 
 // ---------------------------------------------------------------------------
 // DOM References
@@ -323,6 +325,7 @@ async function fetchRoute() {
         currentRouteCoords = data.route;
         currentPathIndex = 0;
         currentPathFraction = 0;
+        currentSegmentDistance = null;
 
         // Update info panel
         routeInfo.style.display = 'block';
@@ -372,8 +375,12 @@ function handleStartSimulation() {
 async function simulationLoop(time) {
     if (!isSimulating) return;
     
-    // Growth rate tweaks
-    floodRadius += 1.5; 
+    // Calculate elapsed time (delta time) in seconds
+    const deltaSeconds = Math.min((time - lastFrameTime) / 1000, 0.1); // cap delta time to 100ms to avoid huge jumps
+    lastFrameTime = time;
+
+    // Growth rate: 30 meters per second
+    floodRadius += 30 * deltaSeconds;
     if (floodCircle) {
         floodCircle.setRadius(floodRadius);
     }
@@ -383,14 +390,24 @@ async function simulationLoop(time) {
         const p1 = currentRouteCoords[currentPathIndex];
         const p2 = currentRouteCoords[currentPathIndex + 1];
         
-        const dist = map.distance(p1, p2); // distance in meters
-        const moveDist = 30; // meters per frame (speed of ambulance)
+        // Cache segment distance to avoid costly map.distance recalculations every frame
+        if (currentSegmentDistance === null) {
+            currentSegmentDistance = map.distance(p1, p2);
+        }
         
-        currentPathFraction += moveDist / dist;
+        // Ambulance speed: 120 meters per second for smooth, fast simulation
+        const moveDist = 120 * deltaSeconds; 
+        
+        if (currentSegmentDistance > 0) {
+            currentPathFraction += moveDist / currentSegmentDistance;
+        } else {
+            currentPathFraction = 1;
+        }
         
         if (currentPathFraction >= 1) {
             currentPathIndex++;
             currentPathFraction = 0;
+            currentSegmentDistance = null; // Reset segment distance cache for the next segment
             // Snap exactly to next point on reaching it
             if(currentPathIndex < currentRouteCoords.length){
                  userLatLng = currentRouteCoords[currentPathIndex];
@@ -412,8 +429,9 @@ async function simulationLoop(time) {
         return;
     }
 
-    // Collision Detection with Turf.js
-    if (floodCircle) {
+    // Collision Detection with Turf.js: Throttle checks to every 250ms for performance optimization
+    if (floodCircle && (time - lastCollisionCheckTime >= 250)) {
+        lastCollisionCheckTime = time;
         // Build remaining path
         const remainingCoords = [userLatLng, ...currentRouteCoords.slice(currentPathIndex + 1)];
         if (remainingCoords.length >= 2) {
@@ -460,6 +478,7 @@ async function fetchFloodRoute() {
         currentRouteCoords = data.route;
         currentPathIndex = 0;
         currentPathFraction = 0;
+        currentSegmentDistance = null;
 
         // Update info panel
         routeDistance.textContent = `${data.distance_km} km`;

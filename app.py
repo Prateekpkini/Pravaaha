@@ -116,18 +116,17 @@ def haversine_heuristic(u, v):
     node2 = graph.nodes[v]
     lon1, lat1 = node1['x'], node1['y']
     lon2, lat2 = node2['x'], node2['y']
-    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
-    c = 2 * math.asin(math.sqrt(a))
-    distance_m = c * 6371000
+    # Fast Euclidean approximation scaled to Mangalore's latitude (~12.87 degrees)
+    # cos(12.87 degrees) = 0.97487
+    dx = (lon2 - lon1) * 111000.0 * 0.97487
+    dy = (lat2 - lat1) * 111000.0
+    distance_m = math.sqrt(dx*dx + dy*dy)
     # Return optimistic travel time (assuming max network speed of 100 km/h = 27.78 m/s)
     return distance_m / 27.78
 
 
 @app.get("/get-route")
-async def get_route(
+def get_route(
     start_lat: float = Query(..., description="Start latitude"),
     start_lon: float = Query(..., description="Start longitude"),
     end_lat: float = Query(..., description="End latitude"),
@@ -231,7 +230,7 @@ async def get_route(
 
 
 @app.get("/get-flood-route")
-async def get_flood_route(
+def get_flood_route(
     start_lat: float = Query(..., description="Ambulance current latitude"),
     start_lon: float = Query(..., description="Ambulance current longitude"),
     end_lat: float = Query(..., description="Destination latitude"),
@@ -242,8 +241,7 @@ async def get_flood_route(
 ):
     """
     Compute a route that avoids an expanding circular flood zone.
-    Temporarily penalizes all edges touching nodes inside the flood radius,
-    then restores original weights after pathfinding.
+    Uses a custom weight function that penalizes any edge touching a node within the flood zone.
     """
     if graph is None or kdtree is None:
         raise HTTPException(status_code=503, detail="Graph not loaded")
@@ -260,55 +258,34 @@ async def get_flood_route(
         raise HTTPException(status_code=400, detail="Start and end resolve to the same node")
 
     # Convert flood radius from meters to approximate degrees for KD-Tree query
-    # 1 degree latitude ~ 111,000m; 1 degree longitude ~ 111,000m * cos(lat)
     radius_deg = flood_radius_m / 111000.0
 
     # Find all node indices within the flood radius
     flooded_indices = kdtree.query_ball_point([flood_lon, flood_lat], radius_deg)
 
     # Collect the flooded node IDs
-    flooded_node_set = set()
-    for idx in flooded_indices:
-        flooded_node_set.add(node_ids[idx])
+    flooded_node_set = set(node_ids[idx] for idx in flooded_indices)
 
-    # Temporarily penalize all edges touching flooded nodes
-    modified_edges = []
-    PENALTY = 999999.0
-    for fnode in flooded_node_set:
-        # Outgoing edges
-        if graph.has_node(fnode):
-            for u, v, k, d in graph.edges(fnode, keys=True, data=True):
-                original_tt = d.get("travel_time", 10.0)
-                if original_tt < PENALTY:
-                    modified_edges.append((u, v, k, original_tt))
-                    d["travel_time"] = PENALTY
-            # Incoming edges (for DiGraph traversal)
-            for u, v, k, d in graph.in_edges(fnode, keys=True, data=True):
-                original_tt = d.get("travel_time", 10.0)
-                if original_tt < PENALTY:
-                    modified_edges.append((u, v, k, original_tt))
-                    d["travel_time"] = PENALTY
+    # Define custom weight function to penalize flooded roads dynamically without mutating the graph
+    def flood_weight_fn(u, v, edge_dict):
+        min_w = float('inf')
+        for key, data in edge_dict.items():
+            original_tt = data.get("travel_time", 10.0)
+            if u in flooded_node_set or v in flooded_node_set:
+                weight = original_tt + 1000000.0  # Large dynamic penalty
+            else:
+                weight = original_tt
+            if weight < min_w:
+                min_w = weight
+        return min_w
 
     try:
         path_nodes = nx.astar_path(
             graph, orig_node, dest_node,
-            heuristic=haversine_heuristic, weight="travel_time"
+            heuristic=haversine_heuristic, weight=flood_weight_fn
         )
     except nx.NetworkXNoPath:
-        # Restore weights before raising
-        for u, v, k, orig_tt in modified_edges:
-            try:
-                graph[u][v][k]["travel_time"] = orig_tt
-            except KeyError:
-                pass
         raise HTTPException(status_code=404, detail="No route found avoiding the flood zone")
-    finally:
-        # Always restore original weights
-        for u, v, k, orig_tt in modified_edges:
-            try:
-                graph[u][v][k]["travel_time"] = orig_tt
-            except KeyError:
-                pass
 
     # Build response coordinates and distance
     coords = []
