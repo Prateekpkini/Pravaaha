@@ -1,150 +1,137 @@
-# Pravaaha — Low-Bandwidth Telemedicine Gateway
+# Pravaaha (AquaRoute)
 
-A Go-based telemedicine data gateway designed for **< 64 kbps bandwidth** and **> 20% packet loss** environments. Transmits patient vitals and medical images from field workers to a specialist hospital over a custom **UDP + Reed-Solomon FEC** protocol.
+Pravaaha is a real-time, flood-aware routing engine that computes optimal paths and isochrones (reachable areas) by integrating OpenStreetMap (OSM) data with dynamic flood depth updates. It allows emergency response vehicles (like ambulances and rescue trucks) to safely navigate around flooded zones based on their specific clearance heights.
 
-## Architecture
+The system is composed of:
+1. **A Rust Backend**: An [Axum](https://github.com/tokio-rs/axum)-based web server that parses OSM PBF road networks, builds a spatial R-tree index, updates road flood levels in real time, and executes a customized bidirectional A* algorithm.
+2. **A React Frontend**: A React + TypeScript application built with Vite and [React Leaflet](https://react-leaflet.js.org/) for interactive map visualisations, vehicle clearance toggles, and localized flood simulation.
 
-```
-┌──────────────────────┐          UDP + FEC           ┌──────────────────────┐
-│   FIELD CLIENT       │  ◄─────────────────────────► │   HOSPITAL SERVER    │
-│                      │    < 64 kbps, > 20% loss     │                      │
-│  ┌────────────────┐  │                              │  ┌────────────────┐  │
-│  │  CLI Interface  │  │   512-byte chunks            │  │  UDP Receiver   │  │
-│  └───────┬────────┘  │   4+1 Reed-Solomon FEC        │  └───────┬────────┘  │
-│          │           │   NACK-only retransmission     │          │           │
-│  ┌───────▼────────┐  │                              │  ┌───────▼────────┐  │
-│  │ SQLite Queue   │  │                              │  │ FEC Reassembler │  │
-│  │ (Store&Forward)│  │                              │  └───────┬────────┘  │
-│  └───────┬────────┘  │                              │          │           │
-│          │           │                              │  ┌───────▼────────┐  │
-│  ┌───────▼────────┐  │                              │  │ SQLite + Disk  │  │
-│  │  UDP Sender    │  │                              │  │  (Vitals+Images)│  │
-│  │  (Rate Limited)│  │                              │  └───────┬────────┘  │
-│  └────────────────┘  │                              │          │           │
-│                      │                              │  ┌───────▼────────┐  │
-│                      │                              │  │ HTTP Dashboard │  │
-│                      │                              │  │   :8080        │  │
-│                      │                              │  └────────────────┘  │
-└──────────────────────┘                              └──────────────────────┘
+---
+
+## Architecture Overview
+
+```mermaid
+graph TD
+    OSM[OSM PBF File] -->|Parses| Parser[OSM Parser]
+    Parser -->|Builds Graph| Graph[Routing Graph & R-Tree Index]
+    Client[Web Browser Frontend] -->|GET /api/route| API[Axum API Server]
+    Client -->|GET /api/isochrone| API
+    Client -->|POST /api/flood-update| API
+    API -->|Queries / Updates| Graph
 ```
 
-## Key Design Decisions
+### Key Components
 
-| Feature | Implementation | Rationale |
-|---------|---------------|-----------|
-| **Serialization** | CBOR (integer keys) | ~30 bytes per vitals record, no codegen |
-| **FEC** | Reed-Solomon 4+1 | ~95% of groups self-heal at 20% loss |
-| **Chunk Size** | 512 bytes | Under 576-byte minimum MTU, no fragmentation |
-| **Retransmission** | NACK-only | Minimizes upstream bandwidth |
-| **Rate Limiting** | ~6 KB/s | Fits in 64 kbps with ACK headroom |
-| **SQLite** | `modernc.org/sqlite` | Pure Go, no CGO, static binary |
-| **Offline** | Store-and-forward queue | Survives total connectivity loss |
+*   **OSM PBF Parser (`osm_parser.rs`)**: Uses the `osmpbfreader` crate to ingest road networks (filtered by `highway` tags), computes distances using the Haversine formula, and respects one-way constraints.
+*   **Spatial Indexing (`graph.rs`)**: Employs an R-Tree index (via the `rstar` crate) to quickly resolve geographic coordinates (latitude and longitude) to the nearest road edges.
+*   **Flood-Aware Bidirectional A* (`routing.rs`)**: Computes paths by searching from both the start and goal simultaneously. Edges exceeding a vehicle's `clearance_mm` are dynamically bypassed during traversal.
+*   **Isochrone Explorer (`routing.rs`)**: Uses a modified Dijkstra algorithm to retrieve all road edges reachable from a starting coordinate within a specific time duration, filtering out impassable flooded sections.
 
-## Quick Start
+---
+
+## Directory Structure
+
+```
+pravaaha/
+├── backend/                  # Rust Web Server
+│   ├── Cargo.toml            # Backend dependencies & configuration
+│   └── src/
+│       ├── api.rs            # Axum route handlers & serialization
+│       ├── graph.rs          # Data structures for nodes, edges, & R-Tree
+│       ├── main.rs           # Server entry point & OSM parsing startup
+│       ├── osm_parser.rs     # Parser to build graphs from .osm.pbf
+│       └── routing.rs        # Bidirectional A* & Isochrone algorithms
+├── frontend/                 # React + TypeScript + Vite Application
+│   ├── package.json
+│   ├── src/
+│   │   ├── App.tsx           # Main application shell with Leaflet map
+│   │   ├── index.css
+│   │   └── main.tsx
+│   └── vite.config.ts
+├── monaco-latest.osm.pbf     # Sample map dataset for Monaco
+└── karnataka-latest.osm.pbf   # Sample map dataset for Karnataka
+```
+
+---
+
+## Getting Started
 
 ### Prerequisites
 
-- Go 1.22+
-- GNU Make (or run `go build` directly)
+*   **Rust**: Ensure you have the Rust toolchain installed (edition 2024 support is required).
+*   **Node.js & npm**: Required to build and run the frontend interface.
 
-### Build
+### Running the Backend
 
-```bash
-# Build for current platform
-make build-client
-make build-server
+1. Navigate to the `backend/` directory:
+   ```bash
+   cd backend
+   ```
+2. Build and run the server (which parses the `monaco-latest.osm.pbf` file by default on startup):
+   ```bash
+   cargo run --release
+   ```
+   The backend server will launch and listen on `http://localhost:8080`.
 
-# Cross-compile for Linux (AMD64 + ARM)
-make build-all
+### Running the Frontend
 
-# Windows
-make build-windows
-```
+1. Navigate to the `frontend/` directory:
+   ```bash
+   cd frontend
+   ```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Run the development server:
+   ```bash
+   npm run dev
+   ```
+4. Open the displayed URL (usually `http://localhost:5173`) in your web browser.
 
-### Run
+---
 
-**Terminal 1 — Start the server:**
-```bash
-./bin/pravaaha-server -udp-port 9000 -http-port 8080
-```
+## API Endpoints
 
-**Terminal 2 — Run the client with mock data:**
-```bash
-./bin/pravaaha-client -server 127.0.0.1 -port 9000 mock
-```
+### 1. Route Calculation
+*   **Endpoint**: `GET /api/route`
+*   **Query Parameters**:
+    *   `start_lat` (f64)
+    *   `start_lng` (f64)
+    *   `end_lat` (f64)
+    *   `end_lng` (f64)
+    *   `clearance_mm` (u32): Clearance threshold of the vehicle.
+*   **Response**: Returns a GeoJSON `Feature` representing the path (`LineString`), or `null` if no passable route is available.
 
-**Terminal 3 — View the dashboard:**
-Open `http://localhost:8080` in your browser.
+### 2. Isochrone Generation
+*   **Endpoint**: `GET /api/isochrone`
+*   **Query Parameters**:
+    *   `lat` (f64)
+    *   `lng` (f64)
+    *   `time_limit_sec` (f64)
+    *   `clearance_mm` (u32)
+*   **Response**: Returns a GeoJSON array of road segments reachable within the time limit.
 
-### Client Commands
+### 3. Dynamic Flood Update
+*   **Endpoint**: `POST /api/flood-update`
+*   **Request Body**: A JSON array of updates containing coordinates and water depths:
+    ```json
+    [
+      {
+        "lat": 43.7315,
+        "lng": 7.4168,
+        "depth_mm": 350
+      }
+    ]
+    ```
+*   **Response**: Returns the number of edges successfully updated in the spatial index (as an integer).
 
-```bash
-# Generate and queue mock vitals + test image
-pravaaha-client mock
+---
 
-# Queue a vitals record
-pravaaha-client send-vitals -patient P-1001 -hr 72 -spo2 98 -sys 120 -dia 80 -temp 36.6
+## Interactive Features (Frontend)
 
-# Queue an image file
-pravaaha-client send-image /path/to/xray.jpg -patient P-1001
-
-# Check queue status
-pravaaha-client status
-```
-
-### Server Flags
-
-```bash
-pravaaha-server \
-  -udp-port 9000 \
-  -http-port 8080 \
-  -db pravaaha_server.db \
-  -image-dir data/images
-```
-
-## Project Structure
-
-```
-Pravaaha/
-├── cmd/
-│   ├── client/main.go       # Client CLI + background sender
-│   └── server/main.go       # Server UDP + HTTP dashboard
-├── pkg/
-│   ├── protocol/
-│   │   ├── messages.go      # CBOR message types & serialization
-│   │   ├── fec.go           # Reed-Solomon 4+1 FEC encode/decode
-│   │   ├── chunker.go       # Image chunking + FEC group reassembly
-│   │   └── udp.go           # UDP transport, rate limiting, ACK/NACK
-│   ├── storage/
-│   │   ├── queue.go         # Client store-and-forward SQLite queue
-│   │   └── server_db.go     # Server vitals + image metadata SQLite
-│   └── dashboard/
-│       ├── server.go        # Minimal HTTP dashboard handler
-│       └── templates/
-│           └── index.html   # Auto-refreshing dashboard UI
-├── go.mod
-├── go.sum
-└── Makefile
-```
-
-## Protocol Wire Format
-
-Every UDP datagram has the format: `[1-byte type][CBOR payload]`
-
-| Type | Value | Direction | Description |
-|------|-------|-----------|-------------|
-| `TypeVitals` | 1 | Client→Server | Patient vital signs |
-| `TypeChunk` | 2 | Client→Server | Image data/parity chunk |
-| `TypeAck` | 3 | Server→Client | FEC group acknowledged |
-| `TypeNack` | 4 | Server→Client | Unrecoverable group |
-| `TypeVitalsAck` | 5 | Server→Client | Vitals receipt confirmed |
-
-## Testing
-
-```bash
-make test
-```
-
-## License
-
-MIT
+*   **Interactive Waypoint Placement**: Single-click on the map to set the **Start** marker; click again to set the **End** marker. The route is automatically calculated and rendered as a blue line.
+*   **Vehicle Clearance Selector**: Choose between:
+    *   *Standard Ambulance* (150mm clearance threshold)
+    *   *Rescue Truck* (500mm clearance threshold)
+*   **Flood Simulator**: Clicking the **"Simulate Flood near Start"** button reports random flood depths (300mm) at 100 nearby nodes. The routing engine dynamically recalculates a detour avoiding these sectors if the vehicle's clearance is lower than the flood depth.
