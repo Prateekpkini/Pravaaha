@@ -12,6 +12,7 @@ extendLeaflet(L);
 // Constants
 // ---------------------------------------------------------------------------
 const MANGALORE_CENTER = [12.87, 74.88];
+const KANACHUR_CENTER = [12.8105, 74.8732];
 const DEFAULT_ZOOM = 13;
 const API_BASE = '';  // Same origin
 
@@ -56,44 +57,45 @@ let destLatLng = null;
 let userMarker = null;
 let destMarker = null;
 let routePolyline = null;
-let floodLayers = [];
 let isFloodActive = false;
-let weatherCondition = 'clear'; // 'clear' or 'monsoon'
+
+// Simulation State
+let isSimulating = false;
+let animationFrameId = null;
+let currentPathIndex = 0;
+let currentPathFraction = 0;
+let currentRouteCoords = [];
+let floodCircle = null;
+let floodCenter = null;
+let floodRadius = 0;
+let lastFrameTime = 0;
 
 // ---------------------------------------------------------------------------
 // DOM References
 // ---------------------------------------------------------------------------
-const btnRoute = document.getElementById('btn-route');
-const btnFlood = document.getElementById('btn-flood');
-const btnClear = document.getElementById('btn-clear');
+const btnSimulate = document.getElementById('btn-simulate');
 const btnClearRoute = document.getElementById('btn-clear-route');
-const inputStart = document.getElementById('input-start');
-const btnSearchStart = document.getElementById('btn-search-start');
 const inputEnd = document.getElementById('input-end');
 const btnSearchEnd = document.getElementById('btn-search-end');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const routeInfo = document.getElementById('route-info');
 const routeDistance = document.getElementById('route-distance');
-const routeNodes = document.getElementById('route-nodes');
+const routeEta = document.getElementById('route-eta');
 const floodStatusEl = document.getElementById('flood-status');
 const loadingOverlay = document.getElementById('loading-overlay');
 const loadingText = document.getElementById('loading-text');
 
-// New Controls
-const toggleMonsoon = document.getElementById('toggle-monsoon');
+// Toggles
 const toggleTheme = document.getElementById('toggle-theme');
-const btnGps = document.getElementById('btn-gps');
-
-let clickState = 'start';
 
 // ---------------------------------------------------------------------------
 // Custom Markers
 // ---------------------------------------------------------------------------
-function createUserIcon() {
+function createAmbulanceIcon() {
     return L.divIcon({
-        className: 'user-marker',
-        html: `<div class="user-marker-pulse"></div><div class="user-marker-dot"></div>`,
+        className: 'ambulance-marker',
+        html: `<div class="ambulance-marker-pulse"></div>🚑`,
         iconSize: [40, 40],
         iconAnchor: [20, 20],
     });
@@ -109,129 +111,33 @@ function createDestIcon() {
 }
 
 // ---------------------------------------------------------------------------
-// Geolocation & Reverse Geocoding
+// Geolocation
 // ---------------------------------------------------------------------------
 function initGeolocation() {
-    if (!navigator.geolocation) {
-        setUserPosition(MANGALORE_CENTER[0], MANGALORE_CENTER[1]);
-        updateStatus('Geolocation unavailable — using default', 'warning');
-        return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-        (pos) => {
-            const { latitude, longitude } = pos.coords;
-            // Check if user is roughly near Mangalore (within ~50km)
-            const dist = Math.sqrt(
-                Math.pow(latitude - MANGALORE_CENTER[0], 2) +
-                Math.pow(longitude - MANGALORE_CENTER[1], 2)
-            );
-            if (dist > 0.5) {
-                // User is far from Mangalore, use default center
-                setUserPosition(MANGALORE_CENTER[0], MANGALORE_CENTER[1]);
-                updateStatus('Location outside Mangalore — using default', 'warning');
-            } else {
-                setUserPosition(latitude, longitude);
-                updateStatus('Location acquired', 'ok');
-            }
-        },
-        () => {
-            setUserPosition(MANGALORE_CENTER[0], MANGALORE_CENTER[1]);
-            updateStatus('Location denied — using default', 'warning');
-        },
-        { enableHighAccuracy: true, timeout: 8000 }
-    );
+    // Hardcode to Kanachur IMS for the simulation
+    setStartMarker(KANACHUR_CENTER[0], KANACHUR_CENTER[1]);
+    map.setView(KANACHUR_CENTER, 14);
+    updateStatus('Ambulance stationed at Kanachur IMS. Click map for destination.', 'ok');
 }
-
-function setUserPosition(lat, lon) {
-    setStartMarker(lat, lon);
-    map.setView([lat, lon], DEFAULT_ZOOM);
-}
-
-// Fetch user geolocation on crosshair click and reverse-geocode using Nominatim
-async function handleGpsSnapping() {
-    if (!navigator.geolocation) {
-        updateStatus('Geolocation unavailable on this device', 'warning');
-        return;
-    }
-
-    showLoading('Snapping current GPS location...');
-    navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-            const { latitude, longitude } = pos.coords;
-            
-            // Check if coordinates snap near Mangalore
-            const dist = Math.sqrt(
-                Math.pow(latitude - MANGALORE_CENTER[0], 2) +
-                Math.pow(longitude - MANGALORE_CENTER[1], 2)
-            );
-
-            if (dist > 0.5) {
-                setUserPosition(MANGALORE_CENTER[0], MANGALORE_CENTER[1]);
-                inputStart.value = 'Mangalore, India';
-                updateStatus('Location outside Mangalore — using center', 'warning');
-                hideLoading();
-            } else {
-                setStartMarker(latitude, longitude);
-                map.setView([latitude, longitude], DEFAULT_ZOOM);
-                updateStatus('Resolving address...', 'ok');
-                
-                try {
-                    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        const addressText = data.display_name || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
-                        inputStart.value = addressText;
-                        updateStatus('Address resolved from coordinates', 'ok');
-                    } else {
-                        inputStart.value = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
-                        updateStatus('GPS coordinates snap set (address lookup failed)', 'warning');
-                    }
-                } catch (err) {
-                    inputStart.value = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
-                    updateStatus('GPS coordinates snap set (network error)', 'warning');
-                } finally {
-                    hideLoading();
-                }
-            }
-        },
-        (err) => {
-            updateStatus(`GPS snapping failed: ${err.message}`, 'danger');
-            hideLoading();
-        },
-        { enableHighAccuracy: true, timeout: 8000 }
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Destination Selection
-// ---------------------------------------------------------------------------
-map.on('click', (e) => {
-    if (clickState === 'start') {
-        setStartMarker(e.latlng.lat, e.latlng.lng);
-        clickState = 'end';
-        updateStatus('Start location set. Click map to set destination.', 'ok');
-    } else {
-        setEndMarker(e.latlng.lat, e.latlng.lng);
-        clickState = 'start';
-        updateStatus('Destination set — ready to route', 'ok');
-    }
-});
 
 function setStartMarker(lat, lon) {
     userLatLng = [lat, lon];
     if (userMarker) {
         userMarker.setLatLng(userLatLng);
     } else {
-        userMarker = L.marker(userLatLng, { icon: createUserIcon() }).addTo(map).bindPopup('<b>📍 Start Location</b>');
+        userMarker = L.marker(userLatLng, { icon: createAmbulanceIcon(), zIndexOffset: 1000 }).addTo(map).bindPopup('<b>🚑 Kanachur IMS</b>');
     }
-    userMarker.openPopup();
-    if (inputStart && !inputStart.value) {
-        inputStart.value = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-    }
-    clickState = 'end';
-    checkRouteReady();
 }
+
+// ---------------------------------------------------------------------------
+// Destination Selection
+// ---------------------------------------------------------------------------
+map.on('click', (e) => {
+    if (isSimulating) return; // Prevent changing destination during sim
+    setEndMarker(e.latlng.lat, e.latlng.lng);
+    updateStatus('Destination set — fetching route...', 'ok');
+    fetchRoute();
+});
 
 function setEndMarker(lat, lon) {
     destLatLng = [lat, lon];
@@ -247,33 +153,27 @@ function setEndMarker(lat, lon) {
 
 function checkRouteReady() {
     if (userLatLng && destLatLng) {
-        btnRoute.disabled = false;
+        btnSimulate.disabled = false;
     } else {
-        btnRoute.disabled = true;
+        btnSimulate.disabled = true;
     }
 }
 
-async function searchLocation(type) {
-    const input = type === 'start' ? inputStart : inputEnd;
-    const query = input.value.trim();
+async function searchLocation() {
+    const query = inputEnd.value.trim();
     if (!query) return;
 
-    showLoading(`Searching for location...`);
+    showLoading(`Searching for destination...`);
     try {
         const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
         const data = await res.json();
         if (data && data.length > 0) {
             const lat = parseFloat(data[0].lat);
             const lon = parseFloat(data[0].lon);
-            if (type === 'start') {
-                setStartMarker(lat, lon);
-                map.setView([lat, lon], DEFAULT_ZOOM);
-                updateStatus('Start location found', 'ok');
-            } else {
-                setEndMarker(lat, lon);
-                map.setView([lat, lon], DEFAULT_ZOOM);
-                updateStatus('Destination found — ready to route', 'ok');
-            }
+            setEndMarker(lat, lon);
+            map.setView([lat, lon], DEFAULT_ZOOM);
+            updateStatus('Destination found — fetching route...', 'ok');
+            fetchRoute();
         } else {
             updateStatus('Location not found', 'warning');
         }
@@ -286,23 +186,29 @@ async function searchLocation(type) {
 }
 
 function clearSelection() {
-    if (userMarker) {
-        map.removeLayer(userMarker);
-        userMarker = null;
+    if (isSimulating) {
+        cancelAnimationFrame(animationFrameId);
+        isSimulating = false;
     }
+    
     if (destMarker) {
         map.removeLayer(destMarker);
         destMarker = null;
     }
-    userLatLng = null;
+    if (floodCircle) {
+        map.removeLayer(floodCircle);
+        floodCircle = null;
+    }
+    
+    // Reset ambulance to start
+    setStartMarker(KANACHUR_CENTER[0], KANACHUR_CENTER[1]);
+    
     destLatLng = null;
-    if (inputStart) inputStart.value = '';
     if (inputEnd) inputEnd.value = '';
-    clickState = 'start';
     clearRoute();
     routeInfo.style.display = 'none';
     checkRouteReady();
-    updateStatus('Selection cleared', 'ok');
+    updateStatus('Selection cleared. Set a new destination.', 'ok');
 }
 
 // ---------------------------------------------------------------------------
@@ -388,45 +294,12 @@ function clearRoute() {
 }
 
 // ---------------------------------------------------------------------------
-// Flood Visualization
-// ---------------------------------------------------------------------------
-function drawFloodZones(geometries) {
-    clearFloodZones();
-
-    geometries.forEach((segment) => {
-        // Glowing red hazard line
-        const hazardGlow = L.polyline(segment, {
-            color: '#ef4444',
-            weight: 18,
-            opacity: 0.2,
-            lineCap: 'round',
-            interactive: false,
-        }).addTo(map);
-
-        const hazardLine = L.polyline(segment, {
-            color: '#ef4444',
-            weight: 6,
-            opacity: 0.85,
-            lineCap: 'round',
-            dashArray: '8, 12',
-        }).addTo(map).bindPopup('⚠️ <b>Flooded Road</b><br>Waterlogging detected');
-
-        floodLayers.push(hazardGlow, hazardLine);
-    });
-}
-
-function clearFloodZones() {
-    floodLayers.forEach((layer) => map.removeLayer(layer));
-    floodLayers = [];
-}
-
-// ---------------------------------------------------------------------------
-// API Calls
+// API Calls & Simulation
 // ---------------------------------------------------------------------------
 async function fetchRoute() {
     if (!userLatLng || !destLatLng) return;
 
-    showLoading(weatherCondition === 'monsoon' ? 'Computing safest monsoon route...' : 'Computing safest route...');
+    showLoading('Computing optimal route...');
 
     try {
         const params = new URLSearchParams({
@@ -434,7 +307,7 @@ async function fetchRoute() {
             start_lon: userLatLng[1],
             end_lat: destLatLng[0],
             end_lon: destLatLng[1],
-            weather_condition: weatherCondition,
+            weather_condition: 'clear',
         });
 
         const res = await fetch(`${API_BASE}/get-route?${params}`);
@@ -447,22 +320,18 @@ async function fetchRoute() {
 
         clearRoute();
         drawRoute(data.route);
+        currentRouteCoords = data.route;
+        currentPathIndex = 0;
+        currentPathFraction = 0;
 
         // Update info panel
         routeInfo.style.display = 'block';
         routeDistance.textContent = `${data.distance_km} km`;
-        routeNodes.textContent = data.node_count;
-        floodStatusEl.textContent = data.flood_active ? '⚠️ Active' : '✅ Clear';
-        floodStatusEl.className = `info-value ${data.flood_active ? 'flood-active' : ''}`;
+        routeEta.textContent = `${Math.ceil(data.estimated_time_s / 60)} min`;
+        floodStatusEl.textContent = 'Clear';
+        floodStatusEl.className = `info-value`;
 
-        updateStatus(
-            data.flood_active
-                ? 'Rerouted — avoiding flooded roads'
-                : weatherCondition === 'monsoon'
-                    ? 'Monsoon safe route calculated'
-                    : 'Safe route calculated',
-            data.flood_active ? 'warning' : 'ok'
-        );
+        updateStatus('Route calculated. Ready for simulation.', 'ok');
     } catch (err) {
         updateStatus(`Error: ${err.message}`, 'danger');
         console.error('Route error:', err);
@@ -471,92 +340,158 @@ async function fetchRoute() {
     }
 }
 
-async function triggerFlood() {
-    showLoading('Simulating monsoon surge...');
-
-    try {
-        const res = await fetch(`${API_BASE}/simulate-flood`, { method: 'POST' });
-        if (!res.ok) throw new Error('Flood simulation failed');
-
-        const data = await res.json();
-        isFloodActive = true;
-
-        drawFloodZones(data.geometries);
-
-        updateStatus(`🌊 ${data.flooded_roads} roads flooded!`, 'danger');
-        floodStatusEl.textContent = '⚠️ Active';
-        floodStatusEl.className = 'info-value flood-active';
-
-        // Re-route to avoid flooded roads if a destination exists
-        if (destLatLng) {
-            loadingText.textContent = 'Re-routing to avoid floods...';
-            await fetchRoute();
-        }
-    } catch (err) {
-        updateStatus(`Error: ${err.message}`, 'danger');
-        console.error('Flood error:', err);
-    } finally {
-        hideLoading();
+// Start the simulation loop
+function handleStartSimulation() {
+    if (!currentRouteCoords || currentRouteCoords.length === 0) return;
+    
+    isSimulating = true;
+    btnSimulate.disabled = true;
+    updateStatus('Simulation running...', 'warning');
+    
+    // Pick a flood location slightly ahead on the route
+    if (!floodCircle) {
+        const midIndex = Math.min(currentRouteCoords.length - 1, Math.floor(currentRouteCoords.length * 0.4));
+        const targetPoint = currentRouteCoords[midIndex];
+        // Offset it slightly so it has to grow to hit the route
+        floodCenter = [targetPoint[0] + 0.002, targetPoint[1] + 0.002]; 
+        floodRadius = 50; 
+        
+        floodCircle = L.circle(floodCenter, {
+            color: '#ef4444',
+            fillColor: '#ef4444',
+            fillOpacity: 0.4,
+            radius: floodRadius,
+            weight: 2
+        }).addTo(map);
     }
+    
+    lastFrameTime = performance.now();
+    animationFrameId = requestAnimationFrame(simulationLoop);
 }
 
-async function clearWeather() {
-    showLoading('Clearing flood conditions...');
+async function simulationLoop(time) {
+    if (!isSimulating) return;
+    
+    // Growth rate tweaks
+    floodRadius += 1.5; 
+    if (floodCircle) {
+        floodCircle.setRadius(floodRadius);
+    }
 
-    try {
-        const res = await fetch(`${API_BASE}/reset-flood`, { method: 'POST' });
-        if (!res.ok) throw new Error('Reset failed');
-
-        isFloodActive = false;
-        clearFloodZones();
-
-        updateStatus('☀️ Weather cleared — roads restored', 'ok');
-        floodStatusEl.textContent = '✅ Clear';
-        floodStatusEl.className = 'info-value';
-
-        // Re-route on clear roads if a destination exists
-        if (destLatLng) {
-            loadingText.textContent = 'Recalculating optimal route...';
-            await fetchRoute();
+    // Move ambulance
+    if (currentPathIndex < currentRouteCoords.length - 1) {
+        const p1 = currentRouteCoords[currentPathIndex];
+        const p2 = currentRouteCoords[currentPathIndex + 1];
+        
+        const dist = map.distance(p1, p2); // distance in meters
+        const moveDist = 30; // meters per frame (speed of ambulance)
+        
+        currentPathFraction += moveDist / dist;
+        
+        if (currentPathFraction >= 1) {
+            currentPathIndex++;
+            currentPathFraction = 0;
+            // Snap exactly to next point on reaching it
+            if(currentPathIndex < currentRouteCoords.length){
+                 userLatLng = currentRouteCoords[currentPathIndex];
+                 if(userMarker) userMarker.setLatLng(userLatLng);
+            }
+        } else {
+            const lat = p1[0] + (p2[0] - p1[0]) * currentPathFraction;
+            const lng = p1[1] + (p2[1] - p1[1]) * currentPathFraction;
+            userLatLng = [lat, lng];
+            if (userMarker) {
+                userMarker.setLatLng(userLatLng);
+            }
         }
+    } else {
+        // reached destination
+        isSimulating = false;
+        btnSimulate.disabled = false;
+        updateStatus('Destination Reached!', 'ok');
+        return;
+    }
+
+    // Collision Detection with Turf.js
+    if (floodCircle) {
+        // Build remaining path
+        const remainingCoords = [userLatLng, ...currentRouteCoords.slice(currentPathIndex + 1)];
+        if (remainingCoords.length >= 2) {
+            // Turf uses [lon, lat]
+            const line = turf.lineString(remainingCoords.map(c => [c[1], c[0]]));
+            const center = turf.point([floodCenter[1], floodCenter[0]]);
+            const circle = turf.circle(center, floodRadius / 1000, {steps: 32, units: 'kilometers'});
+            
+            if (turf.booleanIntersects(line, circle)) {
+                isSimulating = false; // Pause
+                updateStatus('Flood collision imminent! Rerouting...', 'danger');
+                await fetchFloodRoute();
+                return; // fetchFloodRoute will resume loop
+            }
+        }
+    }
+
+    animationFrameId = requestAnimationFrame(simulationLoop);
+}
+
+async function fetchFloodRoute() {
+    try {
+        const params = new URLSearchParams({
+            start_lat: userLatLng[0],
+            start_lon: userLatLng[1],
+            end_lat: destLatLng[0],
+            end_lon: destLatLng[1],
+            flood_lat: floodCenter[0],
+            flood_lon: floodCenter[1],
+            flood_radius_m: floodRadius
+        });
+
+        const res = await fetch(`${API_BASE}/get-flood-route?${params}`);
+        if (!res.ok) {
+            throw new Error('No safe route around flood found.');
+        }
+
+        const data = await res.json();
+        
+        // Remove old glow and draw new route
+        clearRoute();
+        drawRoute(data.route);
+        
+        currentRouteCoords = data.route;
+        currentPathIndex = 0;
+        currentPathFraction = 0;
+
+        // Update info panel
+        routeDistance.textContent = `${data.distance_km} km`;
+        routeEta.textContent = `${Math.ceil(data.estimated_time_s / 60)} min`;
+        floodStatusEl.textContent = 'Rerouted';
+        floodStatusEl.className = 'info-value flood-active';
+        updateStatus('Rerouted successfully. Resuming...', 'warning');
+
+        // Give it a brief pause for visual effect, then resume
+        setTimeout(() => {
+            if(destLatLng) {
+                isSimulating = true;
+                lastFrameTime = performance.now();
+                animationFrameId = requestAnimationFrame(simulationLoop);
+            }
+        }, 1000);
+        
     } catch (err) {
-        updateStatus(`Error: ${err.message}`, 'danger');
-        console.error('Reset error:', err);
-    } finally {
-        hideLoading();
+        updateStatus(`Reroute Error: ${err.message}`, 'danger');
+        console.error('Reroute error:', err);
     }
 }
 
 // ---------------------------------------------------------------------------
 // Event Listeners
 // ---------------------------------------------------------------------------
-btnRoute.addEventListener('click', fetchRoute);
-btnFlood.addEventListener('click', triggerFlood);
-btnClear.addEventListener('click', clearWeather);
+btnSimulate.addEventListener('click', handleStartSimulation);
 if (btnClearRoute) btnClearRoute.addEventListener('click', clearSelection);
-if (btnSearchStart) btnSearchStart.addEventListener('click', () => searchLocation('start'));
-if (btnSearchEnd) btnSearchEnd.addEventListener('click', () => searchLocation('end'));
-if (inputStart) inputStart.addEventListener('keydown', (e) => e.key === 'Enter' && searchLocation('start'));
-if (inputEnd) inputEnd.addEventListener('keydown', (e) => e.key === 'Enter' && searchLocation('end'));
-
-// GPS Button snap trigger
-if (btnGps) {
-    btnGps.addEventListener('click', handleGpsSnapping);
-}
+if (btnSearchEnd) btnSearchEnd.addEventListener('click', searchLocation);
+if (inputEnd) inputEnd.addEventListener('keydown', (e) => e.key === 'Enter' && searchLocation());
 
 // Settings changes
-if (toggleMonsoon) {
-    toggleMonsoon.addEventListener('change', async (e) => {
-        weatherCondition = e.target.checked ? 'monsoon' : 'clear';
-        updateStatus(`Monsoon simulation: ${weatherCondition === 'monsoon' ? 'ON' : 'OFF'}`, 'ok');
-        
-        // Auto trigger route calculation if locations exist
-        if (userLatLng && destLatLng) {
-            await fetchRoute();
-        }
-    });
-}
-
 if (toggleTheme) {
     toggleTheme.addEventListener('change', (e) => {
         const theme = e.target.checked ? 'light' : 'dark';
