@@ -34,10 +34,27 @@
             <span id="status-text">Initializing...</span>
         </div>
 
+        <div class="search-group">
+            <div class="search-input-wrapper">
+                <input type="text" id="input-start" class="search-input" placeholder="Start Location..." autocomplete="off" />
+                <button id="btn-search-start" class="btn-search" title="Search">🔍</button>
+            </div>
+            <div class="search-input-wrapper">
+                <input type="text" id="input-end" class="search-input" placeholder="End Location..." autocomplete="off" />
+                <button id="btn-search-end" class="btn-search" title="Search">🔍</button>
+            </div>
+        </div>
+
         <div class="button-group">
             <button id="btn-route" class="btn btn-primary" disabled>
                 <span class="btn-icon">🧭</span>
                 <span class="btn-label">Find Safe Route</span>
+                <div class="btn-ripple"></div>
+            </button>
+
+            <button id="btn-clear-route" class="btn btn-secondary">
+                <span class="btn-icon">🔄</span>
+                <span class="btn-label">Clear Selection</span>
                 <div class="btn-ripple"></div>
             </button>
 
@@ -84,6 +101,6 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <!-- App JS -->
-    <script src="/static/app.js"></script>
+    <script type="module" src="/static/app.js"></script>
 </body>
 </html>

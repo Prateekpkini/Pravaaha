@@ -239,6 +239,59 @@ html, body {
 }
 
 
+/* ---------- Search Inputs ---------- */
+.search-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 18px;
+}
+
+.search-input-wrapper {
+    display: flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    transition: border-color var(--transition-fast);
+}
+
+.search-input-wrapper:focus-within {
+    border-color: var(--cyan-400);
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.2);
+}
+
+.search-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    outline: none;
+}
+
+.search-input::placeholder {
+    color: var(--text-muted);
+}
+
+.btn-search {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 4px;
+    transition: color var(--transition-fast), transform var(--transition-fast);
+    outline: none;
+}
+
+.btn-search:hover {
+    color: var(--cyan-400);
+    transform: scale(1.1);
+}
+
 /* ---------- Buttons ---------- */
 .button-group {
     display: flex;
@@ -295,6 +348,19 @@ html, body {
 .btn-primary:hover:not(:disabled) {
     background: linear-gradient(135deg, var(--cyan-500), var(--teal-400));
     box-shadow: var(--shadow-btn-hover), var(--shadow-glow-cyan);
+    transform: translateY(-2px);
+}
+
+/* Secondary — Slate/Gray */
+.btn-secondary {
+    background: linear-gradient(135deg, #475569, #64748b);
+    color: #fff;
+    box-shadow: var(--shadow-btn);
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: linear-gradient(135deg, #64748b, #94a3b8);
+    box-shadow: var(--shadow-btn-hover);
     transform: translateY(-2px);
 }
 

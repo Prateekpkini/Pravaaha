@@ -7,11 +7,13 @@ and provides sub-second routing with synthetic flood simulation.
 
 import os
 import random
+import math
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import networkx as nx
 import osmnx as ox
+from scipy.spatial import KDTree
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -22,7 +24,9 @@ from fastapi.responses import FileResponse
 GRAPH_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mangalore.graphml")
 
 graph: Optional[nx.MultiDiGraph] = None
-# Track flooded edges: list of (u, v, key, original_length)
+kdtree: Optional[KDTree] = None
+node_ids: list = []
+# Track flooded edges: list of (u, v, key, original_travel_time)
 flooded_edges: list[tuple] = []
 # Store flooded road geometries for frontend rendering
 flooded_geometries: list[list[list[float]]] = []
@@ -33,7 +37,7 @@ flooded_geometries: list[list[list[float]]] = []
 # ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global graph
+    global graph, kdtree, node_ids
     print("Loading Mangalore street graph into memory...")
     if not os.path.exists(GRAPH_PATH):
         raise FileNotFoundError(
@@ -42,8 +46,38 @@ async def lifespan(app: FastAPI):
         )
     graph = ox.load_graphml(GRAPH_PATH)
     print(f"Graph loaded -- {graph.number_of_nodes():,} nodes, {graph.number_of_edges():,} edges")
+    
+    print("Preprocessing edge weights and building spatial index...")
+    # Preprocess edge weights (travel_time)
+    for u, v, k, d in graph.edges(keys=True, data=True):
+        length_m = d.get("length", 100)
+        speed_val = d.get("maxspeed", 30)
+        if isinstance(speed_val, list): speed_val = speed_val[0]
+        try:
+            speed_kmh = float(speed_val)
+        except:
+            hw = d.get("highway", "")
+            speeds = {
+                "motorway": 100, "trunk": 80, "primary": 60, "secondary": 50,
+                "tertiary": 40, "unclassified": 30, "residential": 30
+            }
+            if isinstance(hw, list): hw = hw[0]
+            speed_kmh = speeds.get(hw, 30)
+            
+        speed_ms = speed_kmh * 1000 / 3600
+        d["travel_time"] = length_m / speed_ms
+
+    # Build KD-Tree for fast node snapping
+    nodes = list(graph.nodes(data=True))
+    node_ids = [n[0] for n in nodes]
+    coords = [[n[1]['x'], n[1]['y']] for n in nodes]
+    kdtree = KDTree(coords)
+
+    print("Backend ready.")
     yield
     graph = None
+    kdtree = None
+    node_ids = []
     print("Graph unloaded.")
 
 
@@ -77,6 +111,21 @@ async def health():
     }
 
 
+def haversine_heuristic(u, v):
+    node1 = graph.nodes[u]
+    node2 = graph.nodes[v]
+    lon1, lat1 = node1['x'], node1['y']
+    lon2, lat2 = node2['x'], node2['y']
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    distance_m = c * 6371000
+    # Return optimistic travel time (assuming max network speed of 100 km/h = 27.78 m/s)
+    return distance_m / 27.78
+
+
 @app.get("/get-route")
 async def get_route(
     start_lat: float = Query(..., description="Start latitude"),
@@ -85,16 +134,18 @@ async def get_route(
     end_lon: float = Query(..., description="End longitude"),
 ):
     """
-    Find the shortest driveable route between two coordinates.
+    Find the fastest driveable route between two coordinates using A*.
     Respects dynamically modified flood weights for real-time rerouting.
     """
-    if graph is None:
+    if graph is None or kdtree is None:
         raise HTTPException(status_code=503, detail="Graph not loaded")
 
     try:
-        # Snap lat/lon to nearest graph nodes
-        orig_node = ox.nearest_nodes(graph, X=start_lon, Y=start_lat)
-        dest_node = ox.nearest_nodes(graph, X=end_lon, Y=end_lat)
+        # Snap lat/lon to nearest graph nodes using KD-Tree
+        _, idx1 = kdtree.query([start_lon, start_lat])
+        orig_node = node_ids[idx1]
+        _, idx2 = kdtree.query([end_lon, end_lat])
+        dest_node = node_ids[idx2]
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not snap coordinates to graph: {e}")
 
@@ -102,8 +153,8 @@ async def get_route(
         raise HTTPException(status_code=400, detail="Start and end resolve to the same node")
 
     try:
-        # Dijkstra shortest path using edge 'length' attribute (meters)
-        path_nodes = nx.shortest_path(graph, orig_node, dest_node, weight="length")
+        # A* shortest path using 'travel_time' attribute
+        path_nodes = nx.astar_path(graph, orig_node, dest_node, heuristic=haversine_heuristic, weight="travel_time")
     except nx.NetworkXNoPath:
         raise HTTPException(status_code=404, detail="No route found between these points")
 
@@ -154,13 +205,13 @@ async def simulate_flood():
     flooded_geometries = []
 
     for u, v, key, data in candidates:
-        original_length = data.get("length", 100)
+        original_tt = data.get("travel_time", 10.0)
 
         # Store original weight for reset
-        flooded_edges.append((u, v, key, original_length))
+        flooded_edges.append((u, v, key, original_tt))
 
         # Multiply weight by 1000x to make this road extremely costly
-        graph[u][v][key]["length"] = original_length * 1000
+        graph[u][v][key]["travel_time"] = original_tt * 1000
 
         # Build geometry for frontend rendering
         u_data = graph.nodes[u]
@@ -190,9 +241,9 @@ async def simulate_flood():
 def _reset_flood_internal():
     """Internal helper to restore all flooded edge weights."""
     global flooded_edges, flooded_geometries
-    for u, v, key, original_length in flooded_edges:
+    for u, v, key, original_tt in flooded_edges:
         try:
-            graph[u][v][key]["length"] = original_length
+            graph[u][v][key]["travel_time"] = original_tt
         except KeyError:
             pass  # Edge may have been removed
     flooded_edges = []

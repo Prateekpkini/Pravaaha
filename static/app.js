@@ -1,7 +1,12 @@
+import { extendLeaflet } from 'https://esm.sh/@india-boundary-corrector/leaflet-layer';
+
 /**
  * Pravaaha — app.js
  * Frontend logic: Leaflet map, geolocation, routing, flood visualization
  */
+
+// Extend Leaflet with the corrector
+extendLeaflet(L);
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -20,9 +25,9 @@ const map = L.map('map', {
     attributionControl: true,
 });
 
-// CartoDB Dark Matter tiles for sleek dark aesthetic
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+// CartoDB Dark Matter tiles with India Boundary Corrector for accurate borders
+L.tileLayer.indiaBoundaryCorrected('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
     subdomains: 'abcd',
     maxZoom: 19,
 }).addTo(map);
@@ -44,6 +49,11 @@ let isFloodActive = false;
 const btnRoute = document.getElementById('btn-route');
 const btnFlood = document.getElementById('btn-flood');
 const btnClear = document.getElementById('btn-clear');
+const btnClearRoute = document.getElementById('btn-clear-route');
+const inputStart = document.getElementById('input-start');
+const btnSearchStart = document.getElementById('btn-search-start');
+const inputEnd = document.getElementById('input-end');
+const btnSearchEnd = document.getElementById('btn-search-end');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const routeInfo = document.getElementById('route-info');
@@ -52,6 +62,8 @@ const routeNodes = document.getElementById('route-nodes');
 const floodStatusEl = document.getElementById('flood-status');
 const loadingOverlay = document.getElementById('loading-overlay');
 const loadingText = document.getElementById('loading-text');
+
+let clickState = 'start';
 
 // ---------------------------------------------------------------------------
 // Custom Markers
@@ -110,39 +122,109 @@ function initGeolocation() {
 }
 
 function setUserPosition(lat, lon) {
-    userLatLng = [lat, lon];
-
-    if (userMarker) {
-        userMarker.setLatLng(userLatLng);
-    } else {
-        userMarker = L.marker(userLatLng, { icon: createUserIcon() })
-            .addTo(map)
-            .bindPopup('<b>📍 Your Location</b>');
-    }
-
-    map.setView(userLatLng, DEFAULT_ZOOM);
+    setStartMarker(lat, lon);
+    map.setView([lat, lon], DEFAULT_ZOOM);
 }
 
 // ---------------------------------------------------------------------------
 // Destination Selection
 // ---------------------------------------------------------------------------
 map.on('click', (e) => {
-    destLatLng = [e.latlng.lat, e.latlng.lng];
+    if (clickState === 'start') {
+        setStartMarker(e.latlng.lat, e.latlng.lng);
+        clickState = 'end';
+        updateStatus('Start location set. Click map to set destination.', 'ok');
+    } else {
+        setEndMarker(e.latlng.lat, e.latlng.lng);
+        clickState = 'start';
+        updateStatus('Destination set — ready to route', 'ok');
+    }
+});
 
+function setStartMarker(lat, lon) {
+    userLatLng = [lat, lon];
+    if (userMarker) {
+        userMarker.setLatLng(userLatLng);
+    } else {
+        userMarker = L.marker(userLatLng, { icon: createUserIcon() }).addTo(map).bindPopup('<b>📍 Start Location</b>');
+    }
+    userMarker.openPopup();
+    if (inputStart) inputStart.value = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+    clickState = 'end';
+    checkRouteReady();
+}
+
+function setEndMarker(lat, lon) {
+    destLatLng = [lat, lon];
     if (destMarker) {
         destMarker.setLatLng(destLatLng);
     } else {
-        destMarker = L.marker(destLatLng, { icon: createDestIcon() })
-            .addTo(map)
-            .bindPopup('<b>🎯 Destination</b>');
+        destMarker = L.marker(destLatLng, { icon: createDestIcon() }).addTo(map).bindPopup('<b>🎯 Destination</b>');
     }
-
     destMarker.openPopup();
+    if (inputEnd) inputEnd.value = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+    checkRouteReady();
+}
 
-    // Enable the route button
-    btnRoute.disabled = false;
-    updateStatus('Destination set — ready to route', 'ok');
-});
+function checkRouteReady() {
+    if (userLatLng && destLatLng) {
+        btnRoute.disabled = false;
+    } else {
+        btnRoute.disabled = true;
+    }
+}
+
+async function searchLocation(type) {
+    const input = type === 'start' ? inputStart : inputEnd;
+    const query = input.value.trim();
+    if (!query) return;
+
+    showLoading(`Searching for location...`);
+    try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
+        const data = await res.json();
+        if (data && data.length > 0) {
+            const lat = parseFloat(data[0].lat);
+            const lon = parseFloat(data[0].lon);
+            if (type === 'start') {
+                setStartMarker(lat, lon);
+                map.setView([lat, lon], DEFAULT_ZOOM);
+                updateStatus('Start location found', 'ok');
+            } else {
+                setEndMarker(lat, lon);
+                map.setView([lat, lon], DEFAULT_ZOOM);
+                updateStatus('Destination found — ready to route', 'ok');
+            }
+        } else {
+            updateStatus('Location not found', 'warning');
+        }
+    } catch (err) {
+        console.error(err);
+        updateStatus('Search failed', 'danger');
+    } finally {
+        hideLoading();
+    }
+}
+
+function clearSelection() {
+    if (userMarker) {
+        map.removeLayer(userMarker);
+        userMarker = null;
+    }
+    if (destMarker) {
+        map.removeLayer(destMarker);
+        destMarker = null;
+    }
+    userLatLng = null;
+    destLatLng = null;
+    if (inputStart) inputStart.value = '';
+    if (inputEnd) inputEnd.value = '';
+    clickState = 'start';
+    clearRoute();
+    routeInfo.style.display = 'none';
+    checkRouteReady();
+    updateStatus('Selection cleared', 'ok');
+}
 
 // ---------------------------------------------------------------------------
 // Ripple effect on buttons
@@ -367,6 +449,11 @@ async function clearWeather() {
 btnRoute.addEventListener('click', fetchRoute);
 btnFlood.addEventListener('click', triggerFlood);
 btnClear.addEventListener('click', clearWeather);
+if (btnClearRoute) btnClearRoute.addEventListener('click', clearSelection);
+if (btnSearchStart) btnSearchStart.addEventListener('click', () => searchLocation('start'));
+if (btnSearchEnd) btnSearchEnd.addEventListener('click', () => searchLocation('end'));
+if (inputStart) inputStart.addEventListener('keydown', (e) => e.key === 'Enter' && searchLocation('start'));
+if (inputEnd) inputEnd.addEventListener('keydown', (e) => e.key === 'Enter' && searchLocation('end'));
 
 // ---------------------------------------------------------------------------
 // Health Check & Init
