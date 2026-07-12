@@ -280,9 +280,9 @@ def get_flood_route(
         return min_w
 
     try:
-        path_nodes = nx.astar_path(
-            graph, orig_node, dest_node,
-            heuristic=haversine_heuristic, weight=flood_weight_fn
+        # Use bidirectional search for faster flood-aware rerouting on the large Mangalore graph.
+        _, path_nodes = nx.bidirectional_dijkstra(
+            graph, orig_node, dest_node, weight=flood_weight_fn
         )
     except nx.NetworkXNoPath:
         raise HTTPException(status_code=404, detail="No route found avoiding the flood zone")

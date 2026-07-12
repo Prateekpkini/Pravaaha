@@ -80,6 +80,7 @@ let floodGrowthFrozen = false;
 let lastFrameTime = 0;
 let currentSegmentDistance = null;
 let lastCollisionCheckTime = 0;
+let lastMapPanTime = 0;
 
 // ---------------------------------------------------------------------------
 // DOM References
@@ -293,8 +294,12 @@ function drawRoute(coords) {
     // Store glow reference on the main polyline for cleanup
     routePolyline._glowLine = glowLine;
 
-    // Fit map to route
-    map.fitBounds(routePolyline.getBounds(), { padding: [80, 80] });
+    // Fit map to route with extra left padding for the sidebar
+    map.fitBounds(routePolyline.getBounds(), {
+        padding: [80, 80],
+        paddingTopLeft: [300, 20],
+    });
+    lastMapPanTime = performance.now();
 }
 
 function hideDirections() {
@@ -527,6 +532,7 @@ async function simulationLoop(time) {
                 userLatLng = currentRouteCoords[currentPathIndex];
                 if (userMarker) userMarker.setLatLng(userLatLng);
             }
+            updateCurrentDirection();
         } else {
             const lat = p1[0] + (p2[0] - p1[0]) * currentPathFraction;
             const lng = p1[1] + (p2[1] - p1[1]) * currentPathFraction;
@@ -534,6 +540,13 @@ async function simulationLoop(time) {
             if (userMarker) {
                 userMarker.setLatLng(userLatLng);
             }
+        }
+
+        // Keep the ambulance visible by periodically panning the map slightly right of center
+        if (time - lastMapPanTime >= 400) {
+            map.panTo(userLatLng, { animate: false });
+            map.panBy([120, 0], { animate: false });
+            lastMapPanTime = time;
         }
     } else {
         // reached destination
