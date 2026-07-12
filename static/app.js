@@ -33,12 +33,12 @@ function setTileLayer(theme) {
     if (activeTileLayer) {
         map.removeLayer(activeTileLayer);
     }
-    
+
     // Choose CartoDB Positron for light theme, Dark Matter for dark theme
     const tileUrl = theme === 'light'
         ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
         : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-        
+
     activeTileLayer = L.tileLayer.indiaBoundaryCorrected(tileUrl, {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
         subdomains: 'abcd',
@@ -65,9 +65,16 @@ let animationFrameId = null;
 let currentPathIndex = 0;
 let currentPathFraction = 0;
 let currentRouteCoords = [];
+const FLOOD_INITIAL_RADIUS = 50;
+const FLOOD_MAX_RADIUS = 400;
+const FLOOD_GROWTH_RATE = 30; // meters per second
+const FLOOD_GROWTH_DURATION = 6; // seconds until growth freezes
+
 let floodCircle = null;
 let floodCenter = null;
 let floodRadius = 0;
+let floodGrowthTime = 0;
+let floodGrowthFrozen = false;
 let lastFrameTime = 0;
 let currentSegmentDistance = null;
 let lastCollisionCheckTime = 0;
@@ -192,7 +199,7 @@ function clearSelection() {
         cancelAnimationFrame(animationFrameId);
         isSimulating = false;
     }
-    
+
     if (destMarker) {
         map.removeLayer(destMarker);
         destMarker = null;
@@ -201,10 +208,10 @@ function clearSelection() {
         map.removeLayer(floodCircle);
         floodCircle = null;
     }
-    
+
     // Reset ambulance to start
     setStartMarker(KANACHUR_CENTER[0], KANACHUR_CENTER[1]);
-    
+
     destLatLng = null;
     if (inputEnd) inputEnd.value = '';
     clearRoute();
@@ -346,19 +353,21 @@ async function fetchRoute() {
 // Start the simulation loop
 function handleStartSimulation() {
     if (!currentRouteCoords || currentRouteCoords.length === 0) return;
-    
+
     isSimulating = true;
     btnSimulate.disabled = true;
     updateStatus('Simulation running...', 'warning');
-    
+
     // Pick a flood location slightly ahead on the route
     if (!floodCircle) {
         const midIndex = Math.min(currentRouteCoords.length - 1, Math.floor(currentRouteCoords.length * 0.4));
         const targetPoint = currentRouteCoords[midIndex];
         // Offset it slightly so it has to grow to hit the route
-        floodCenter = [targetPoint[0] + 0.002, targetPoint[1] + 0.002]; 
-        floodRadius = 50; 
-        
+        floodCenter = [targetPoint[0] + 0.002, targetPoint[1] + 0.002];
+        floodRadius = FLOOD_INITIAL_RADIUS;
+        floodGrowthTime = 0;
+        floodGrowthFrozen = false;
+
         floodCircle = L.circle(floodCenter, {
             color: '#ef4444',
             fillColor: '#ef4444',
@@ -367,20 +376,27 @@ function handleStartSimulation() {
             weight: 2
         }).addTo(map);
     }
-    
+
     lastFrameTime = performance.now();
     animationFrameId = requestAnimationFrame(simulationLoop);
 }
 
 async function simulationLoop(time) {
     if (!isSimulating) return;
-    
+
     // Calculate elapsed time (delta time) in seconds
     const deltaSeconds = Math.min((time - lastFrameTime) / 1000, 0.1); // cap delta time to 100ms to avoid huge jumps
     lastFrameTime = time;
 
-    // Growth rate: 30 meters per second
-    floodRadius += 30 * deltaSeconds;
+    // Growth rate: 30 meters per second until frozen
+    if (!floodGrowthFrozen) {
+        floodGrowthTime += deltaSeconds;
+        floodRadius += FLOOD_GROWTH_RATE * deltaSeconds;
+        if (floodGrowthTime >= FLOOD_GROWTH_DURATION || floodRadius >= FLOOD_MAX_RADIUS) {
+            floodRadius = Math.min(floodRadius, FLOOD_MAX_RADIUS);
+            floodGrowthFrozen = true;
+        }
+    }
     if (floodCircle) {
         floodCircle.setRadius(floodRadius);
     }
@@ -389,29 +405,29 @@ async function simulationLoop(time) {
     if (currentPathIndex < currentRouteCoords.length - 1) {
         const p1 = currentRouteCoords[currentPathIndex];
         const p2 = currentRouteCoords[currentPathIndex + 1];
-        
+
         // Cache segment distance to avoid costly map.distance recalculations every frame
         if (currentSegmentDistance === null) {
             currentSegmentDistance = map.distance(p1, p2);
         }
-        
+
         // Ambulance speed: 120 meters per second for smooth, fast simulation
-        const moveDist = 120 * deltaSeconds; 
-        
+        const moveDist = 120 * deltaSeconds;
+
         if (currentSegmentDistance > 0) {
             currentPathFraction += moveDist / currentSegmentDistance;
         } else {
             currentPathFraction = 1;
         }
-        
+
         if (currentPathFraction >= 1) {
             currentPathIndex++;
             currentPathFraction = 0;
             currentSegmentDistance = null; // Reset segment distance cache for the next segment
             // Snap exactly to next point on reaching it
-            if(currentPathIndex < currentRouteCoords.length){
-                 userLatLng = currentRouteCoords[currentPathIndex];
-                 if(userMarker) userMarker.setLatLng(userLatLng);
+            if (currentPathIndex < currentRouteCoords.length) {
+                userLatLng = currentRouteCoords[currentPathIndex];
+                if (userMarker) userMarker.setLatLng(userLatLng);
             }
         } else {
             const lat = p1[0] + (p2[0] - p1[0]) * currentPathFraction;
@@ -438,8 +454,8 @@ async function simulationLoop(time) {
             // Turf uses [lon, lat]
             const line = turf.lineString(remainingCoords.map(c => [c[1], c[0]]));
             const center = turf.point([floodCenter[1], floodCenter[0]]);
-            const circle = turf.circle(center, floodRadius / 1000, {steps: 32, units: 'kilometers'});
-            
+            const circle = turf.circle(center, floodRadius / 1000, { steps: 32, units: 'kilometers' });
+
             if (turf.booleanIntersects(line, circle)) {
                 isSimulating = false; // Pause
                 updateStatus('Flood collision imminent! Rerouting...', 'danger');
@@ -470,11 +486,11 @@ async function fetchFloodRoute() {
         }
 
         const data = await res.json();
-        
+
         // Remove old glow and draw new route
         clearRoute();
         drawRoute(data.route);
-        
+
         currentRouteCoords = data.route;
         currentPathIndex = 0;
         currentPathFraction = 0;
@@ -489,13 +505,13 @@ async function fetchFloodRoute() {
 
         // Give it a brief pause for visual effect, then resume
         setTimeout(() => {
-            if(destLatLng) {
+            if (destLatLng) {
                 isSimulating = true;
                 lastFrameTime = performance.now();
                 animationFrameId = requestAnimationFrame(simulationLoop);
             }
         }, 1000);
-        
+
     } catch (err) {
         updateStatus(`Reroute Error: ${err.message}`, 'danger');
         console.error('Reroute error:', err);
