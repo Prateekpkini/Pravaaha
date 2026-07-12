@@ -65,6 +65,8 @@ let animationFrameId = null;
 let currentPathIndex = 0;
 let currentPathFraction = 0;
 let currentRouteCoords = [];
+let currentDirections = [];
+let currentDirectionIndex = 0;
 const FLOOD_INITIAL_RADIUS = 50;
 const FLOOD_MAX_RADIUS = 400;
 const FLOOD_GROWTH_RATE = 30; // meters per second
@@ -92,6 +94,9 @@ const routeInfo = document.getElementById('route-info');
 const routeDistance = document.getElementById('route-distance');
 const routeEta = document.getElementById('route-eta');
 const floodStatusEl = document.getElementById('flood-status');
+const directionsSection = document.getElementById('directions-section');
+const nextDirectionText = document.getElementById('next-direction');
+const directionsListEl = document.getElementById('directions-list');
 const loadingOverlay = document.getElementById('loading-overlay');
 const loadingText = document.getElementById('loading-text');
 
@@ -292,6 +297,94 @@ function drawRoute(coords) {
     map.fitBounds(routePolyline.getBounds(), { padding: [80, 80] });
 }
 
+function hideDirections() {
+    if (directionsSection) {
+        directionsSection.style.display = 'none';
+    }
+    if (directionsListEl) {
+        directionsListEl.innerHTML = '';
+    }
+    if (nextDirectionText) {
+        nextDirectionText.textContent = '—';
+    }
+    currentDirections = [];
+    currentDirectionIndex = 0;
+}
+
+function getBearing([lat1, lon1], [lat2, lon2]) {
+    const rad = Math.PI / 180;
+    const phi1 = lat1 * rad;
+    const phi2 = lat2 * rad;
+    const deltaLambda = (lon2 - lon1) * rad;
+    const y = Math.sin(deltaLambda) * Math.cos(phi2);
+    const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLambda);
+    const theta = Math.atan2(y, x);
+    return (theta * 180 / Math.PI + 360) % 360;
+}
+
+function getTurnInstruction(prevBearing, nextBearing) {
+    let diff = nextBearing - prevBearing;
+    if (diff > 180) diff -= 360;
+    if (diff < -180) diff += 360;
+
+    if (Math.abs(diff) <= 25) {
+        return 'Go straight';
+    }
+    if (diff > 25) {
+        return 'Turn right';
+    }
+    return 'Turn left';
+}
+
+function buildDirections(route) {
+    if (!route || route.length < 2) {
+        return [{ routeIndex: 0, text: 'Start and head to the destination' }];
+    }
+
+    const directions = [];
+    let prevBearing = getBearing(route[0], route[1]);
+    directions.push({ routeIndex: 0, text: 'Start by moving straight' });
+
+    for (let i = 1; i < route.length - 1; i += 1) {
+        const bearing = getBearing(route[i], route[i + 1]);
+        const instruction = getTurnInstruction(prevBearing, bearing);
+        if (instruction !== 'Go straight') {
+            directions.push({ routeIndex: i, text: `${instruction} ahead` });
+            prevBearing = bearing;
+        }
+    }
+
+    directions.push({ routeIndex: route.length - 1, text: 'Arrive at your destination' });
+    return directions;
+}
+
+function renderDirections() {
+    if (!directionsSection || !directionsListEl || !nextDirectionText) return;
+
+    if (currentDirections.length === 0) {
+        hideDirections();
+        return;
+    }
+
+    directionsSection.style.display = 'block';
+    directionsListEl.innerHTML = currentDirections.map((direction, index) => {
+        const activeClass = index === currentDirectionIndex ? 'active' : '';
+        return `<li class="${activeClass}">${direction.text}</li>`;
+    }).join('');
+    nextDirectionText.textContent = currentDirections[currentDirectionIndex]?.text || '—';
+}
+
+function updateCurrentDirection() {
+    if (!currentDirections || currentDirections.length === 0) return;
+
+    while (currentDirectionIndex < currentDirections.length - 1 &&
+        currentPathIndex >= currentDirections[currentDirectionIndex + 1].routeIndex) {
+        currentDirectionIndex += 1;
+    }
+
+    renderDirections();
+}
+
 function clearRoute() {
     if (routePolyline) {
         if (routePolyline._glowLine) {
@@ -300,6 +393,7 @@ function clearRoute() {
         map.removeLayer(routePolyline);
         routePolyline = null;
     }
+    hideDirections();
 }
 
 // ---------------------------------------------------------------------------
@@ -333,9 +427,13 @@ async function fetchRoute() {
         currentPathIndex = 0;
         currentPathFraction = 0;
         currentSegmentDistance = null;
+        currentDirections = buildDirections(data.route);
+        currentDirectionIndex = 0;
+        renderDirections();
 
         // Update info panel
         routeInfo.style.display = 'block';
+        directionsSection.style.display = 'block';
         routeDistance.textContent = `${data.distance_km} km`;
         routeEta.textContent = `${Math.ceil(data.estimated_time_s / 60)} min`;
         floodStatusEl.textContent = 'Clear';
@@ -495,6 +593,9 @@ async function fetchFloodRoute() {
         currentPathIndex = 0;
         currentPathFraction = 0;
         currentSegmentDistance = null;
+        currentDirections = buildDirections(data.route);
+        currentDirectionIndex = 0;
+        renderDirections();
 
         // Update info panel
         routeDistance.textContent = `${data.distance_km} km`;
